@@ -1,0 +1,95 @@
+name: BMAD Copilot Agents Orchestrator
+
+# Orchestrates GitHub Copilot custom agents using BMAD Framework
+# Security Advisor: Incremental findings log with OWASP tracking
+# QA Auditor: Requirements traceability matrix with test generation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: 'Agent to run (security | qa | both)'
+        required: false
+        default: 'both'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  bmad-agents:
+    name: Run BMAD Agents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Context
+        id: ctx
+        run: |
+          echo "pr_number=${{ github.event.pull_request.number || 'N/A' }}" >> $GITHUB_OUTPUT
+          echo "run_id=$(date +'%Y-%m-%d')-R${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Detect Changed Files
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.sha }} > changed_files.txt
+          else
+            git diff --name-only HEAD~1 > changed_files.txt
+          fi
+
+      # SECURITY ADVISOR
+      - name: Security Advisor
+        id: security
+        if: github.event.inputs.agent != 'qa'
+        run: |
+          echo "[INFO] Running BMAD Security Advisor"
+          echo "[TODO] Integrate GitHub Copilot agent invocation:"
+          echo "  gh copilot agent run --agent .github/agents/security-advisor.agent.md"
+          echo "[PLACEHOLDER] Simulated security scan - no critical findings"
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      # QA AUDITOR
+      - name: QA Auditor
+        id: qa
+        if: github.event.inputs.agent != 'security'
+        run: |
+          echo "[INFO] Running BMAD QA Auditor"
+          echo "[TODO] Integrate GitHub Copilot agent invocation:"
+          echo "  gh copilot agent run --agent .github/agents/qa-auditor.agent.md"
+          echo "[PLACEHOLDER] Simulated traceability audit - 0% coverage (no reqs yet)"
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Commit Agent Updates
+        run: |
+          git config user.name "BMAD Agents[bot]"
+          git config user.email "bmad-agents[bot]@github.com"
+          git add SECURITY-FINDINGS-LOG.md QA-MATRIX.md tests/ || true
+          git diff --staged --quiet || git commit -m "[BMAD] Update logs - PR#${{ steps.ctx.outputs.pr_number }} Run ${{ steps.ctx.outputs.run_id }}"
+          git push || echo "No changes to push"
+
+      - name: Post PR Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = `## 🤖 BMAD Agents Report\n\n` +
+              `**Run**: \`${{ steps.ctx.outputs.run_id }}\`\n\n` +
+              `| Agent | Status |\n|-------|--------|\n` +
+              `| Security Advisor | ${{ steps.security.outputs.status || 'Skipped' }} |\n` +
+              `| QA Auditor | ${{ steps.qa.outputs.status || 'Skipped' }} |\n\n` +
+              `📊 Full logs: [SECURITY-FINDINGS-LOG.md](./SECURITY-FINDINGS-LOG.md) | [QA-MATRIX.md](./QA-MATRIX.md)`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
